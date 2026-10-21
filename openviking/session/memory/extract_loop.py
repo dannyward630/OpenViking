@@ -490,10 +490,11 @@ class ExtractLoop:
                 or resolution_skip.reason_code not in _EVENT_RETRYABLE_RESOLUTION_SKIP_CODES
             ):
                 continue
-            if resolution_skip.reason_code == MemoryOperationSkipCode.NO_WRITABLE_TARGET and (
-                not self.ctx or not self.ctx.user
-            ):
-                continue
+            if resolution_skip.reason_code == MemoryOperationSkipCode.NO_WRITABLE_TARGET:
+                if not self.ctx or not self.ctx.user:
+                    continue
+                if not self._has_writable_message_target():
+                    continue
             issue = {
                 "memory_type": operation.memory_type,
                 "page_id": operation.page_id,
@@ -503,6 +504,21 @@ class ExtractLoop:
             }
             issues.append(issue)
         return issues
+
+    def _has_writable_message_target(self) -> bool:
+        """Preserve legacy retries if the isolation handler cannot answer the check."""
+        handler = self._isolation_handler
+        has_writable_target = getattr(handler, "has_writable_message_target", None)
+        if not callable(has_writable_target):
+            return True
+        try:
+            return bool(has_writable_target())
+        except Exception:
+            logger.warning(
+                "Unable to determine writable message targets; preserving resolution repair",
+                exc_info=True,
+            )
+            return True
 
     def _build_resolution_repair_instruction(self, issues: List[Dict[str, Any]]) -> str:
         return self._output_protocol.render_resolution_repair(issues)
